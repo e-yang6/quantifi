@@ -11,6 +11,9 @@ IMPORTANT:
 - Do not modify the Market or Portfolio class structures
 """
 
+from math import floor
+import statistics
+
 class Market:
     """
     Represents the stock market with current prices for all available stocks.
@@ -158,14 +161,13 @@ class Portfolio:
         price_per_share = curMarket.stocks[stock_name] * (1 + Market.transaction_fee)
         return self.cash / price_per_share if price_per_share > 0 else 0
 
-
 class Context:
     """
     Store any data you need for your trading strategy.
     
     This class is completely customizable. Use it to track:
     - Historical prices
-    - Calculated indicators (moving averages, momentum, etc.)
+    - Calculculated indicators (moving averages, momentum, etc.)
     - Trading signals
     - Strategy state
     
@@ -175,8 +177,6 @@ class Context:
     """
     
     def __init__(self) -> None:
-        # PUT WHATEVER YOU WANT HERE
-        # Example: Track price history for technical analysis
         self.price_history = {
             "Stock_A": [],
             "Stock_B": [],
@@ -185,7 +185,151 @@ class Context:
             "Stock_E": []
         }
         self.day = 0
+        self.VOL_WINDOW = 10
+        self.MOM_FAST = 10
+        self.MOM_SLOW = 20
+        self.Z_WINDOW = 20
+        self.VOL_TH_HI = 0.025
+        self.VOL_TH_LO = 0.018
+        self.BUY_TH = 0.75
+        self.SELL_TH = -0.75
+        self.CASH_BUFFER = 0.125
+        self.MAX_POS = 0.30
+        self.last_regime = "low"
 
+
+def _pct_change(series):
+    if len(series) < 2:
+        return []
+    out = []
+    i = 1
+    while i < len(series):
+        if series[i-1] != 0:
+            out.append(series[i]/series[i-1]-1.0)
+        else:
+            out.append(0.0)
+        i += 1
+    return out
+
+def _stdev(values):
+    try:
+        if len(values) >= 2:
+            return statistics.stdev(values)
+        else:
+            return 0.0
+    except:
+        return 0.0
+
+def _eq_weight_vol(context: Context) -> float:
+    w = context.VOL_WINDOW
+    if w <= 1:
+        return 0.0
+    first = next(iter(context.price_history.values()))
+    ln = len(first)
+    eqrets = []
+    t = 1
+    while t < min(w+1, ln):
+        daily = []
+        for s in context.price_history:
+            hist = context.price_history[s]
+            if len(hist) >= t+1 and hist[-t-1] != 0:
+                r = hist[-t]/hist[-t-1]-1.0
+                daily.append(r)
+        if len(daily) > 0:
+            eqrets.append(sum(daily)/len(daily))
+        t += 1
+    return _stdev(eqrets)
+
+def _detect_regime(context: Context) -> str:
+    v = _eq_weight_vol(context)
+    if v >= context.VOL_TH_HI:
+        reg = "high"
+    elif v <= context.VOL_TH_LO:
+        reg = "low"
+    else:
+        reg = "transition"
+    context.last_regime = reg
+    return reg
+
+def _momentum_score(stock: str, context: Context) -> float:
+    h = context.price_history[stock]
+    if len(h) < context.MOM_SLOW+1:
+        return 0.0
+    if h[-context.MOM_FAST] != 0:
+        fast = h[-1]/h[-context.MOM_FAST]-1.0
+    else:
+        fast = 0.0
+    if h[-context.MOM_SLOW] != 0:
+        slow = h[-1]/h[-context.MOM_SLOW]-1.0
+    else:
+        slow = 0.0
+    window = h[-context.Z_WINDOW:]
+    vols = _pct_change(window)
+    norm = _stdev(vols)
+    if norm == 0:
+        norm = 1e-6
+    return (fast - slow)/norm
+
+def _meanrev_score(stock: str, context: Context) -> float:
+    h = context.price_history[stock]
+    if len(h) < context.Z_WINDOW:
+        return 0.0
+    window = h[-context.Z_WINDOW:]
+    ma = sum(window)/len(window)
+    rets = _pct_change(window)
+    vol = _stdev(rets)
+    if vol == 0:
+        vol = 1e-6
+    z = (h[-1] - ma) / (ma * vol)
+    return -z
+
+def _stock_vol(stock: str, context: Context, lookback: int = 20) -> float:
+    h = context.price_history[stock]
+    r = _pct_change(h[-lookback:])
+    v = _stdev(r)
+    if v < 0:
+        v = -v
+    if v == 0:
+        v = 1e-6
+    return v
+
+def _inv_vol_weights(cands: list[str], context: Context) -> dict:
+    vols = {}
+    for s in cands:
+        vols[s] = _stock_vol(s, context)
+    inv = {}
+    tot = 0
+    for s in cands:
+        inv[s] = 1.0/vols[s]
+        tot += inv[s]
+    if tot == 0:
+        tot = 1e-6
+    w = {}
+    for s in cands:
+        w[s] = inv[s]/tot
+    return w
+
+def _target_shares(stock: str, w: float, curPortfolio: Portfolio, curMarket: Market, context: Context) -> int:
+    total_val = curPortfolio.evaluate(curMarket)
+    cash_keep = total_val * context.CASH_BUFFER
+    spendable = curPortfolio.cash - cash_keep
+    if spendable < 0:
+        spendable = 0
+    cap = total_val * context.MAX_POS
+    desired_val = w * (total_val - cash_keep)
+    if desired_val > cap:
+        desired_val = cap
+    px = curMarket.stocks[stock]
+    if px <= 0 or desired_val <= 0:
+        return 0
+    cost_one = px * (1 + Market.transaction_fee)
+    if cost_one <= 0:
+        return 0
+    sh = desired_val / cost_one
+    sh = floor(sh)
+    if sh < 0:
+        sh = 0
+    return sh
 
 def update_portfolio(curMarket: Market, curPortfolio: Portfolio, context: Context):
     """
@@ -212,22 +356,84 @@ def update_portfolio(curMarket: Market, curPortfolio: Portfolio, context: Contex
                     curPortfolio.buy(stock, max_shares / 5, curMarket)  # Split equally
         
         context.day += 1
-    """
-    # YOUR TRADING STRATEGY GOES HERE
-    pass
+        """
+    for s in curMarket.stocks:
+        context.price_history[s].append(curMarket.stocks[s])
 
+    any_hist = next(iter(context.price_history.values()))
+    if len(any_hist) <= max(context.MOM_SLOW, context.Z_WINDOW):
+        context.day += 1
+        return
 
-###SIMULATION###
-if __name__ == "__main__":
-    market = Market()
-    portfolio = Portfolio()
-    context = Context()
+    regime = _detect_regime(context)
+    scores = {}
+    for s in curMarket.stocks:
+        if regime == "low":
+            scores[s] = _momentum_score(s, context)
+        elif regime == "high":
+            scores[s] = _meanrev_score(s, context)
+        else:
+            a = _momentum_score(s, context)
+            b = _meanrev_score(s, context)
+            scores[s] = 0.5*(a+b)*0.5
 
-    # Simulate 252 trading days (one trading year)
-    for day in range(252):
-        update_portfolio(market, portfolio, context)
-        market.updateMarket()
+    ranked = sorted(scores.items(), key=lambda k: k[1], reverse=True)
+    longs = []
+    for nm, sc in ranked:
+        if sc >= context.BUY_TH:
+            longs.append(nm)
+    longs = longs[:2]
 
-    # Print final portfolio value
-    final_value = portfolio.evaluate(market)
-    print(f"Final Portfolio Value: ${final_value:,.2f}")
+    exits = []
+    tmp = []
+    for nm, sc in ranked:
+        if sc <= context.SELL_TH:
+            tmp.append(nm)
+    exits = tmp[-2:]
+
+    for s in exits:
+        held = curPortfolio.shares[s]
+        if held > 0:
+            try:
+                curPortfolio.sell(s, held, curMarket)
+            except:
+                pass
+
+    if len(longs) > 0:
+        wts = _inv_vol_weights(longs, context)
+        if regime == "transition":
+            new_w = {}
+            for s in wts:
+                new_w[s] = 0.5*wts[s]
+            wts = new_w
+        for s in longs:
+            tgt = _target_shares(s, wts[s], curPortfolio, curMarket, context)
+            cur = floor(curPortfolio.shares[s])
+            diff = tgt - cur
+            if diff > 0:
+                try:
+                    curPortfolio.buy(s, diff, curMarket)
+                except:
+                    pass
+
+    if regime == "high" and len(longs) == 0:
+        tv = curPortfolio.evaluate(curMarket)
+        cap = tv * context.MAX_POS
+        for s in curMarket.stocks:
+            pv = curPortfolio.get_position_value(s, curMarket)
+            if pv > cap:
+                px = curMarket.stocks[s]
+                if px > 0:
+                    extra = pv - cap
+                    sale_px = px * (1 - Market.transaction_fee)
+                    if sale_px > 0:
+                        trim = floor(extra / sale_px)
+                        if trim > 0:
+                            if trim > curPortfolio.shares[s]:
+                                trim = curPortfolio.shares[s]
+                            try:
+                                curPortfolio.sell(s, trim, curMarket)
+                            except:
+                                pass
+
+    context.day += 1
