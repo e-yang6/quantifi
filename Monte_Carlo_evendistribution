@@ -1,0 +1,609 @@
+# Step 1: Install packages
+!pip install scipy seaborn requests
+
+# Step 2: Download and fix CSV loading
+import requests
+import pandas as pd
+import io
+
+# Use your actual GitHub file URL
+GITHUB_CSV_URL = "https://raw.githubusercontent.com/e-yang6/quantifi/refs/heads/main/UTEFA_QuantiFi_Contestant_Dataset.csv"
+
+# Download the file
+print("📥 Downloading dataset from GitHub...")
+response = requests.get(GITHUB_CSV_URL)
+
+# Try different ways to read the CSV
+try:
+    # Method 1: Try with pandas first
+    df = pd.read_csv(io.StringIO(response.text))
+    print("✅ Method 1: Loaded with pandas successfully!")
+except:
+    try:
+        # Method 2: Try with different encoding
+        df = pd.read_csv(io.StringIO(response.text), encoding='utf-8')
+        print("✅ Method 2: Loaded with UTF-8 encoding!")
+    except:
+        try:
+            # Method 3: Try with error handling for bad lines
+            df = pd.read_csv(io.StringIO(response.text), on_bad_lines='skip')
+            print("✅ Method 3: Loaded by skipping bad lines!")
+        except:
+            try:
+                # Method 4: Try with manual parsing
+                lines = response.text.split('\n')
+                # Find the header
+                header_line = None
+                for i, line in enumerate(lines):
+                    if 'Stock_A,Stock_B,Stock_C,Stock_D,Stock_E' in line:
+                        header_line = i
+                        break
+                
+                if header_line is not None:
+                    # Reconstruct the CSV
+                    clean_lines = lines[header_line:]
+                    clean_csv = '\n'.join(clean_lines)
+                    df = pd.read_csv(io.StringIO(clean_csv))
+                    print("✅ Method 4: Loaded with manual parsing!")
+                else:
+                    print("❌ Could not find header in CSV")
+            except Exception as e:
+                print(f"❌ All methods failed: {e}")
+                # Let's see what the raw data looks like
+                print("First 500 characters of raw data:")
+                print(response.text[:500])
+
+# Save the cleaned data
+df.to_csv('UTEFA_QuantiFi_Contestant_Dataset.csv', index=False)
+print(f"✅ Saved cleaned data. Shape: {df.shape}")
+print("Columns:", df.columns.tolist())
+print("\nFirst few rows:")
+print(df.head())
+
+# Step 3: Paste the Monte Carlo code here
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import norm, gaussian_kde
+import seaborn as sns
+from typing import Dict, List, Tuple
+import warnings
+warnings.filterwarnings('ignore')
+
+class StockMonteCarlo:
+    """
+    Monte Carlo simulator for the 5 stocks in your UTEFA dataset
+    """
+    
+    def __init__(self, csv_file: str = "UTEFA_QuantiFi_Contestant_Dataset.csv"):
+        self.csv_file = csv_file
+        self.price_data = {}
+        self.returns_data = {}
+        self.parameters = {}
+        self.full_data = None
+        
+        # Load and process the data
+        self._load_csv_data()
+        self._calculate_historical_stats()
+    
+    def _load_csv_data(self):
+        """Load data directly from your CSV file format"""
+        try:
+            # Read the CSV file
+            self.full_data = pd.read_csv(self.csv_file)
+            print(f"✓ Successfully loaded CSV with {len(self.full_data)} days of data")
+            
+            # Extract stock prices
+            stocks = ["Stock_A", "Stock_B", "Stock_C", "Stock_D", "Stock_E"]
+            for stock in stocks:
+                if stock in self.full_data.columns:
+                    self.price_data[stock] = self.full_data[stock].values
+                    print(f"  {stock}: {len(self.price_data[stock])} price points")
+                else:
+                    print(f"  Warning: {stock} not found in CSV columns")
+            
+            # Show available columns for reference
+            print(f"\nAvailable columns: {list(self.full_data.columns)}")
+            
+        except Exception as e:
+            print(f"Error loading CSV file: {e}")
+            raise
+    
+    def _calculate_historical_stats(self):
+        """Calculate historical returns and volatility for each stock"""
+        print("\nCalculating Historical Statistics:")
+        print("-" * 50)
+        
+        for stock in self.price_data.keys():
+            prices = np.array(self.price_data[stock])
+            
+            # Remove any NaN values
+            prices = prices[~np.isnan(prices)]
+            
+            if len(prices) < 2:
+                print(f"  {stock}: Insufficient data")
+                continue
+            
+            # Calculate daily returns
+            returns = []
+            for i in range(1, len(prices)):
+                if prices[i-1] > 0:  # Avoid division by zero
+                    daily_return = (prices[i] - prices[i-1]) / prices[i-1]
+                    returns.append(daily_return)
+            
+            self.returns_data[stock] = returns
+            
+            if len(returns) == 0:
+                print(f"  {stock}: No valid returns calculated")
+                continue
+            
+            # Calculate parameters for Geometric Brownian Motion
+            mu = np.mean(returns) * 252  # Annualized return
+            sigma = np.std(returns) * np.sqrt(252)  # Annualized volatility
+            current_price = prices[-1]  # Latest price
+            
+            # Additional statistics
+            sharpe = mu / sigma if sigma > 0 else 0
+            total_return = (prices[-1] - prices[0]) / prices[0]
+            volatility = np.std(returns) * np.sqrt(252)
+            
+            self.parameters[stock] = {
+                'mu': mu,
+                'sigma': sigma,
+                'current_price': current_price,
+                'daily_vol': np.std(returns),
+                'sharpe': sharpe,
+                'total_return': total_return,
+                'volatility': volatility
+            }
+            
+            print(f"{stock}:")
+            print(f"  Current Price: ${current_price:.2f}")
+            print(f"  Annual Return (μ): {mu:.4f} ({mu*100:.2f}%)")
+            print(f"  Annual Vol (σ): {sigma:.4f} ({sigma*100:.2f}%)")
+            print(f"  Sharpe Ratio: {sharpe:.4f}")
+            print(f"  Total Historical Return: {total_return*100:.2f}%")
+            print(f"  Historical Volatility: {volatility*100:.2f}%")
+            print()
+    
+    def get_macro_data(self) -> pd.DataFrame:
+        """Extract macroeconomic data from CSV"""
+        macro_columns = ['Interest_Rate', 'Economic_Growth', 'Inflation']
+        macro_data = {}
+        
+        for col in macro_columns:
+            if col in self.full_data.columns:
+                macro_data[col] = self.full_data[col].values
+        
+        return pd.DataFrame(macro_data)
+    
+    def get_momentum_data(self, stock: str) -> np.ndarray:
+        """Get momentum data for a specific stock"""
+        momentum_col = f"{stock}_Momentum_10d"
+        if momentum_col in self.full_data.columns:
+            return self.full_data[momentum_col].values
+        else:
+            print(f"Momentum data not found for {stock}")
+            return None
+    
+    def get_volume_data(self, stock: str) -> np.ndarray:
+        """Get volume data for a specific stock"""
+        volume_col = f"{stock}_Volume"
+        if volume_col in self.full_data.columns:
+            return self.full_data[volume_col].values
+        else:
+            print(f"Volume data not found for {stock}")
+            return None
+    
+    def gbm_simulation(self, stock: str, days: int = 252, simulations: int = 1000) -> np.ndarray:
+        """
+        Geometric Brownian Motion simulation for a single stock
+        """
+        if stock not in self.parameters:
+            raise ValueError(f"No data available for {stock}")
+        
+        params = self.parameters[stock]
+        mu_daily = params['mu'] / 252
+        sigma_daily = params['sigma'] / np.sqrt(252)
+        S0 = params['current_price']
+        
+        print(f"Simulating {stock}: {simulations} paths, {days} days")
+        print(f"  Starting price: ${S0:.2f}")
+        print(f"  Daily drift: {mu_daily:.6f}")
+        print(f"  Daily volatility: {sigma_daily:.6f}")
+        
+        # Generate random paths
+        dt = 1/252
+        paths = np.zeros((simulations, days))
+        paths[:, 0] = S0
+        
+        # Vectorized implementation for speed
+        for t in range(1, days):
+            # Brownian motion increments
+            dW = np.random.normal(0, np.sqrt(dt), simulations)
+            # GBM formula
+            paths[:, t] = paths[:, t-1] * np.exp(
+                (mu_daily - 0.5 * sigma_daily**2) * dt + 
+                sigma_daily * dW
+            )
+        
+        return paths
+    
+    def correlated_gbm_simulation(self, days: int = 252, simulations: int = 1000) -> Dict[str, np.ndarray]:
+        """
+        Correlated GBM simulation that maintains historical correlations between stocks
+        """
+        print(f"\nRunning Correlated Monte Carlo Simulation:")
+        print(f"  Stocks: {list(self.price_data.keys())}")
+        print(f"  Simulations: {simulations}")
+        print(f"  Days: {days}")
+        
+        # Calculate correlation matrix from historical returns
+        returns_list = []
+        valid_stocks = []
+        
+        for stock in self.price_data.keys():
+            returns = self.returns_data.get(stock, [])
+            if len(returns) > 10:  # Need sufficient data for correlation
+                returns_list.append(returns)
+                valid_stocks.append(stock)
+        
+        if len(returns_list) < 2:
+            print("Insufficient data for correlated simulation")
+            return self._uncorrelated_simulation(days, simulations)
+        
+        # Make returns arrays the same length
+        min_length = min(len(r) for r in returns_list)
+        returns_matrix = np.array([r[:min_length] for r in returns_list])
+        
+        correlation_matrix = np.corrcoef(returns_matrix)
+        
+        print("\nCorrelation Matrix:")
+        corr_df = pd.DataFrame(correlation_matrix, index=valid_stocks, columns=valid_stocks)
+        print(corr_df.round(3))
+        
+        # Cholesky decomposition for correlated random numbers
+        try:
+            L = np.linalg.cholesky(correlation_matrix)
+        except np.linalg.LinAlgError:
+            print("Correlation matrix not positive definite, using regularized version")
+            L = self._nearest_correlation_matrix(correlation_matrix)
+        
+        # Generate correlated paths
+        paths = {}
+        dt = 1/252
+        
+        for i, stock in enumerate(valid_stocks):
+            params = self.parameters[stock]
+            mu_daily = params['mu'] / 252
+            sigma_daily = params['sigma'] / np.sqrt(252)
+            S0 = params['current_price']
+            
+            stock_paths = np.zeros((simulations, days))
+            stock_paths[:, 0] = S0
+            
+            # Generate correlated random numbers
+            uncorrelated_random = np.random.normal(0, 1, (simulations, days-1, len(valid_stocks)))
+            correlated_random = np.dot(uncorrelated_random, L.T)
+            
+            for t in range(1, days):
+                # Use the i-th component for this stock's Brownian motion
+                dW = correlated_random[:, t-1, i] * np.sqrt(dt)
+                stock_paths[:, t] = stock_paths[:, t-1] * np.exp(
+                    (mu_daily - 0.5 * sigma_daily**2) * dt + sigma_daily * dW
+                )
+            
+            paths[stock] = stock_paths
+            print(f"  ✓ Generated paths for {stock}")
+        
+        return paths
+    
+    def _uncorrelated_simulation(self, days: int, simulations: int) -> Dict[str, np.ndarray]:
+        """Fallback to uncorrelated simulation"""
+        print("Using uncorrelated simulation...")
+        paths = {}
+        for stock in self.price_data.keys():
+            paths[stock] = self.gbm_simulation(stock, days, simulations)
+        return paths
+    
+    def _nearest_correlation_matrix(self, corr_matrix: np.ndarray) -> np.ndarray:
+        """Find nearest positive definite correlation matrix"""
+        n = corr_matrix.shape[0]
+        identity = np.eye(n)
+        # Regularize by moving toward identity matrix
+        regularized = 0.9 * corr_matrix + 0.1 * identity
+        return np.linalg.cholesky(regularized)
+    
+    def plot_simulation_results(self, paths: Dict[str, np.ndarray], 
+                              days: int = 252, 
+                              show_percentiles: bool = True,
+                              title_suffix: str = ""):
+        """Plot Monte Carlo simulation results"""
+        stocks = list(paths.keys())
+        n_stocks = len(stocks)
+        
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        axes = axes.flatten()
+        
+        for i, stock in enumerate(stocks):
+            if i >= len(axes):
+                break
+                
+            stock_paths = paths[stock]
+            
+            # Plot individual paths (first 100 for clarity)
+            for j in range(min(100, len(stock_paths))):
+                axes[i].plot(stock_paths[j], alpha=0.05, color='blue', linewidth=0.5)
+            
+            # Plot percentiles
+            if show_percentiles and len(stock_paths) > 0:
+                percentiles = np.percentile(stock_paths, [5, 25, 50, 75, 95], axis=0)
+                axes[i].plot(percentiles[2], color='red', linewidth=2, label='Median')
+                axes[i].fill_between(range(days), percentiles[0], percentiles[4], 
+                                   alpha=0.3, color='red', label='90% CI')
+                
+                # Add current price line
+                current_price = self.parameters[stock]['current_price']
+                axes[i].axhline(y=current_price, color='green', linestyle='--', 
+                              alpha=0.7, label=f'Current: ${current_price:.2f}')
+            
+            axes[i].set_title(f'{stock}\nMonte Carlo Simulation {title_suffix}', fontsize=12)
+            axes[i].set_xlabel('Trading Days')
+            axes[i].set_ylabel('Price ($)')
+            axes[i].legend(fontsize=9)
+            axes[i].grid(True, alpha=0.3)
+            
+            # Add some statistics to the plot
+            final_prices = stock_paths[:, -1]
+            expected_growth = (np.median(final_prices) - current_price) / current_price * 100
+            axes[i].text(0.02, 0.98, f'Expected Growth: {expected_growth:.1f}%', 
+                       transform=axes[i].transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        # Remove empty subplots
+        for i in range(n_stocks, len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def plot_price_distribution(self, paths: Dict[str, np.ndarray], horizon_days: int = 252):
+        """Plot distribution of final prices for each stock"""
+        n_stocks = len(paths)
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        axes = axes.flatten()
+        
+        for i, (stock, stock_paths) in enumerate(paths.items()):
+            if i >= len(axes):
+                break
+                
+            final_prices = stock_paths[:, horizon_days-1]
+            current_price = self.parameters[stock]['current_price']
+            
+            # Plot histogram
+            axes[i].hist(final_prices, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+            axes[i].axvline(current_price, color='red', linestyle='--', linewidth=2, 
+                          label=f'Current: ${current_price:.2f}')
+            axes[i].axvline(np.median(final_prices), color='green', linestyle='--', linewidth=2,
+                          label=f'Median: ${np.median(final_prices):.2f}')
+            
+            axes[i].set_title(f'{stock} - Price Distribution after {horizon_days} days', fontsize=12)
+            axes[i].set_xlabel('Price ($)')
+            axes[i].set_ylabel('Frequency')
+            axes[i].legend()
+            axes[i].grid(True, alpha=0.3)
+            
+            # Add statistics
+            stats_text = f'Mean: ${np.mean(final_prices):.2f}\nStd: ${np.std(final_prices):.2f}'
+            axes[i].text(0.02, 0.98, stats_text, transform=axes[i].transAxes, 
+                       verticalalignment='top',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        # Remove empty subplots
+        for i in range(n_stocks, len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def calculate_value_at_risk(self, paths: Dict[str, np.ndarray], 
+                              confidence_level: float = 0.95,
+                              horizon_days: int = 30) -> Dict[str, float]:
+        """Calculate Value at Risk for each stock"""
+        print(f"\nValue at Risk Analysis ({confidence_level:.0%} confidence, {horizon_days} days):")
+        print("-" * 60)
+        
+        var_results = {}
+        
+        for stock, stock_paths in paths.items():
+            # Get prices at horizon
+            horizon_prices = stock_paths[:, horizon_days-1]
+            current_price = self.parameters[stock]['current_price']
+            
+            # Calculate returns to horizon
+            returns = (horizon_prices - current_price) / current_price
+            
+            # VaR is the loss threshold at given confidence level
+            var = -np.percentile(returns, (1 - confidence_level) * 100)
+            var_results[stock] = var
+            
+            # Additional risk metrics
+            expected_return = np.mean(returns)
+            volatility = np.std(returns)
+            worst_case = np.min(returns)
+            best_case = np.max(returns)
+            
+            print(f"{stock}:")
+            print(f"  VaR: {var:.2%} (max loss with {confidence_level:.0%} confidence)")
+            print(f"  Expected Return: {expected_return:.2%}")
+            print(f"  Volatility: {volatility:.2%}")
+            print(f"  Best Case: {best_case:.2%}")
+            print(f"  Worst Case: {worst_case:.2%}")
+            print()
+        
+        return var_results
+    
+    def portfolio_simulation(self, weights: Dict[str, float] = None,
+                           days: int = 252, 
+                           simulations: int = 1000) -> np.ndarray:
+        """Simulate portfolio performance with given weights"""
+        if weights is None:
+            # Equal weighting if not specified
+            equal_weight = 1.0 / len(self.price_data)
+            weights = {stock: equal_weight for stock in self.price_data.keys()}
+        
+        print(f"Portfolio Simulation:")
+        print(f"  Weights: {weights}")
+        
+        # Get correlated paths
+        paths = self.correlated_gbm_simulation(days, simulations)
+        
+        # Calculate portfolio value for each simulation
+        portfolio_paths = np.zeros((simulations, days))
+        initial_value = 100000  # Starting portfolio value
+        
+        for i in range(simulations):
+            for t in range(days):
+                portfolio_value = 0
+                for stock, weight in weights.items():
+                    if stock in paths:
+                        portfolio_value += weight * paths[stock][i, t]
+                # Scale to initial value
+                if t == 0:
+                    scale_factor = initial_value / portfolio_value if portfolio_value > 0 else 1
+                portfolio_paths[i, t] = portfolio_value * scale_factor
+        
+        return portfolio_paths
+    
+    def analyze_portfolio(self, portfolio_paths: np.ndarray, initial_value: float = 100000):
+        """Analyze portfolio simulation results"""
+        final_values = portfolio_paths[:, -1]
+        returns = (final_values - initial_value) / initial_value
+        
+        analysis = {
+            'mean_final_value': np.mean(final_values),
+            'median_final_value': np.median(final_values),
+            'std_final_value': np.std(final_values),
+            'mean_return': np.mean(returns),
+            'median_return': np.median(returns),
+            'std_return': np.std(returns),
+            'sharpe_ratio': np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0,
+            'value_at_risk_95': np.percentile(returns, 5),
+            'best_case': np.max(returns),
+            'worst_case': np.min(returns),
+            'probability_positive': np.mean(returns > 0),
+            'probability_beats_spy': np.mean(returns > 0.08)  # Assuming 8% for SPY
+        }
+        
+        print("\nPortfolio Analysis:")
+        print("-" * 40)
+        print(f"Mean Final Value: ${analysis['mean_final_value']:,.2f}")
+        print(f"Median Final Value: ${analysis['median_final_value']:,.2f}")
+        print(f"Expected Return: {analysis['mean_return']:.2%}")
+        print(f"Volatility: {analysis['std_return']:.2%}")
+        print(f"Sharpe Ratio: {analysis['sharpe_ratio']:.3f}")
+        print(f"95% VaR: {analysis['value_at_risk_95']:.2%}")
+        print(f"Best Case: {analysis['best_case']:.2%}")
+        print(f"Worst Case: {analysis['worst_case']:.2%}")
+        print(f"Probability of Profit: {analysis['probability_positive']:.2%}")
+        print(f"Probability of Beating SPY: {analysis['probability_beats_spy']:.2%}")
+        
+        return analysis
+
+# Example usage with your CSV file:
+def run_monte_carlo_analysis():
+    """
+    Run complete Monte Carlo analysis on your UTEFA dataset
+    """
+    print("UTEFA QuantiFi - Monte Carlo Analysis")
+    print("=" * 50)
+    
+    # Initialize with your CSV file
+    mc = StockMonteCarlo("UTEFA_QuantiFi_Contestant_Dataset.csv")
+    
+    # Run correlated Monte Carlo simulation
+    print("\n" + "="*50)
+    print("RUNNING MONTE CARLO SIMULATION")
+    print("="*50)
+    
+    paths = mc.correlated_gbm_simulation(days=252, simulations=1000)
+    
+    # Plot simulation results
+    print("\nGenerating simulation plots...")
+    mc.plot_simulation_results(paths, title_suffix="(1000 simulations)")
+    
+    # Plot price distributions
+    print("\nGenerating price distributions...")
+    mc.plot_price_distribution(paths, horizon_days=252)
+    
+    # Calculate risk metrics
+    var_results = mc.calculate_value_at_risk(paths, horizon_days=30)
+    
+    # Portfolio simulation
+    print("\n" + "="*50)
+    print("PORTFOLIO SIMULATION")
+    print("="*50)
+    
+    # Test different portfolio weightings
+    portfolio_weights = [
+        {"Stock_A": 0.2, "Stock_B": 0.2, "Stock_C": 0.2, "Stock_D": 0.2, "Stock_E": 0.2},  # Equal weight
+        {"Stock_A": 0.3, "Stock_B": 0.25, "Stock_C": 0.2, "Stock_D": 0.15, "Stock_E": 0.1},  # Tilted
+        {"Stock_A": 0.4, "Stock_B": 0.3, "Stock_C": 0.15, "Stock_D": 0.1, "Stock_E": 0.05},  # Concentrated
+    ]
+    
+    portfolio_results = []
+    
+    for i, weights in enumerate(portfolio_weights):
+        print(f"\nPortfolio Strategy {i+1}:")
+        print(f"Weights: {weights}")
+        
+        portfolio_paths = mc.portfolio_simulation(weights, days=252, simulations=1000)
+        analysis = mc.analyze_portfolio(portfolio_paths)
+        
+        # Plot portfolio distribution
+        plt.figure(figsize=(10, 6))
+        final_values = portfolio_paths[:, -1]
+        plt.hist(final_values, bins=50, alpha=0.7, color=['blue', 'green', 'red'][i], 
+                edgecolor='black', label=f'Strategy {i+1}')
+        plt.axvline(analysis['mean_final_value'], color='darkred', linestyle='--', 
+                  label=f'Mean: ${analysis["mean_final_value"]:,.0f}')
+        plt.xlabel('Final Portfolio Value ($)')
+        plt.ylabel('Frequency')
+        plt.title(f'Portfolio Value Distribution - Strategy {i+1}')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
+        
+        portfolio_results.append(analysis)
+    
+    # Compare portfolio strategies
+    print("\n" + "="*50)
+    print("PORTFOLIO STRATEGY COMPARISON")
+    print("="*50)
+    
+    comparison_df = pd.DataFrame(portfolio_results)
+    comparison_df.index = [f'Strategy {i+1}' for i in range(len(portfolio_results))]
+    print(comparison_df.round(4))
+    
+    return mc, paths, portfolio_results
+
+# Run the analysis
+if __name__ == "__main__":
+    mc, paths, results = run_monte_carlo_analysis()
+    
+    # Save key results to CSV for further analysis
+    try:
+        # Save final price distributions
+        final_prices_df = pd.DataFrame()
+        for stock, stock_paths in paths.items():
+            final_prices_df[stock] = stock_paths[:, -1]
+        
+        final_prices_df.to_csv('monte_carlo_final_prices.csv', index=False)
+        print("\n✓ Saved final price distributions to 'monte_carlo_final_prices.csv'")
+        
+    except Exception as e:
+        print(f"Note: Could not save results to CSV: {e}")
+
+# Step 4: Run the analysis
+print("🚀 Starting Monte Carlo Analysis...")
+mc, paths, results = run_monte_carlo_analysis()
