@@ -7,7 +7,9 @@ Core ideas:
 - ADX filter to include only strong trend names
 - ATR, volatility and volume tilts to shape position sizing
 - Trailing stop per stock, macro regime risk scaling
-"""
+""" 
+
+"""recommiting"""
 
 import csv
 import statistics
