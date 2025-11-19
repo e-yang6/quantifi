@@ -1,4 +1,10 @@
+# VENV
 .venv/
 venv/
+
+# PYTHON CACHE
 __pycache__/
 *.pyc
+
+# OS files
+.DS_Store
