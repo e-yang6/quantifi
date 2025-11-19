@@ -1,5 +1,5 @@
 # Step 1: Install packages
-!pip install scipy seaborn requests
+
 
 # Step 2: Download and fix CSV loading
 import requests

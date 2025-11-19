@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import requests
 from io import StringIO
-%matplotlib inline
+
 
 print("MONTE CARLO ANALYSIS WITH ECONOMIC INDICATORS")
 print("="*60)

@@ -7,7 +7,7 @@ from io import StringIO
 from scipy import stats
 import warnings
 warnings.filterwarnings('ignore')
-%matplotlib inline
+
 
 print("ROBUST MONTE CARLO ANALYSIS - AVOIDING OVERFITTING")
 print("="*70)

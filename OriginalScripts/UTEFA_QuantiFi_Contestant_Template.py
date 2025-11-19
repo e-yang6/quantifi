@@ -172,6 +172,7 @@ class Context:
     """
 
     def __init__(self) -> None:
+        
         # The five stocks the dataset gives us
         self.stocks = ["Stock_A", "Stock_B", "Stock_C", "Stock_D", "Stock_E"]
 
