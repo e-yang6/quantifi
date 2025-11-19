@@ -238,7 +238,6 @@ class Context:
         x=[v for v in arr if v is not None]
         return statistics.median(x) if x else None
 
-    # ---- ATR & ADX ----
     def compute_atr(self, prices, w):
         if len(prices) < w+1: return None
         trs=[abs(prices[i]-prices[i-1]) for i in range(len(prices)-w, len(prices))]
