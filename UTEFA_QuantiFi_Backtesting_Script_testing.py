@@ -27,18 +27,29 @@ class TimeoutException(Exception):
     pass
 
 
-@contextmanager
-def time_limit(seconds):
-    """Context manager to limit execution time"""
-    def signal_handler(signum, frame):
-        raise TimeoutException("Code execution timed out")
-    
-    signal.signal(signal.SIGALRM, signal_handler)
-    signal.alarm(seconds)
-    try:
+# --- Cross-platform time_limit implementation ---
+# On Unix-like systems, use SIGALRM as before.
+# On platforms without SIGALRM (e.g., Windows), time_limit becomes a no-op
+# so the script still runs without changing the rest of the logic.
+if hasattr(signal, "SIGALRM"):
+    @contextmanager
+    def time_limit(seconds):
+        """Context manager to limit execution time using SIGALRM (Unix only)"""
+        def signal_handler(signum, frame):
+            raise TimeoutException("Code execution timed out")
+        
+        signal.signal(signal.SIGALRM, signal_handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+else:
+    @contextmanager
+    def time_limit(seconds):
+        """No-op time limit for platforms without SIGALRM (e.g., Windows)"""
+        # Timeout enforcement is not available; logic elsewhere stays identical.
         yield
-    finally:
-        signal.alarm(0)
 
 
 def load_price_data(csv_file: str) -> Dict[str, List[float]]:
@@ -242,7 +253,7 @@ def run_simulation(contestant_module, price_data: Dict[str, List[float]]) -> Tup
     print("\nRunning simulation...")
     
     try:
-        with time_limit(60):  # 60 second timeout
+        with time_limit(60):  # 60 second timeout (no-op on Windows)
             for day in range(252):
                 # Contestant's strategy makes trades with current day's prices
                 update_portfolio(market, portfolio, context)
@@ -317,11 +328,31 @@ def generate_report(contestant_file: str, portfolio, market, final_value: float,
     total_return = final_value - starting_value
     percent_return = (total_return / starting_value) * 100
     
+    # Calculate Sharpe Ratio
+    daily_returns = []
+    for i in range(1, len(daily_values)):
+        daily_return = (daily_values[i] - daily_values[i-1]) / daily_values[i-1]
+        daily_returns.append(daily_return)
+    
+    if len(daily_returns) > 0:
+        mean_daily_return = sum(daily_returns) / len(daily_returns)
+        variance = sum((r - mean_daily_return) ** 2 for r in daily_returns) / len(daily_returns)
+        std_daily_return = variance ** 0.5
+        
+        # Annualized Sharpe Ratio (assuming 252 trading days, 0% risk-free rate)
+        if std_daily_return > 0:
+            sharpe_ratio = (mean_daily_return / std_daily_return) * (252 ** 0.5)
+        else:
+            sharpe_ratio = 0.0
+    else:
+        sharpe_ratio = 0.0
+    
     print(f"\nPERFORMANCE METRICS:")
     print(f"  Starting Value: ${starting_value:,.2f}")
     print(f"  Final Value: ${final_value:,.2f}")
     print(f"  Total Return: ${total_return:,.2f}")
     print(f"  Percent Return: {percent_return:.2f}%")
+    print(f"  Sharpe Ratio: {sharpe_ratio:.3f}")
     
     # Transaction summary
     print(tracker.get_summary())
@@ -381,7 +412,7 @@ def main():
     price_data_file = sys.argv[2]
     
     print("=" * 70)
-    print("FINANCIAL MODELING COMPETITION - GRADING SCRIPT")
+    print("UTEFA QuantiFi - GRADING SCRIPT")
     print("=" * 70)
     print(f"\nContestant File: {contestant_file}")
     print(f"Price Data File: {price_data_file}\n")

@@ -1,0 +1,310 @@
+# COMPLETE ENHANCED VERSION USING GITHUB RAW URL
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import requests
+from io import StringIO
+
+
+print("MONTE CARLO ANALYSIS WITH ECONOMIC INDICATORS")
+print("="*60)
+
+# REPLACE THIS WITH YOUR ACTUAL GITHUB RAW URL
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/e-yang6/quantifi/refs/heads/main/UTEFA_QuantiFi_Contestant_Dataset.csv"
+
+print(f"Downloading data from GitHub...")
+print(f"URL: {GITHUB_RAW_URL}")
+
+try:
+    # Download the CSV directly from GitHub
+    response = requests.get(GITHUB_RAW_URL)
+    response.raise_for_status()  # Check for errors
+    
+    # Load the data
+    df = pd.read_csv(StringIO(response.text))
+    print(f"✅ Successfully loaded {len(df)} rows of data from GitHub")
+    print(f"Columns: {df.columns.tolist()}")
+    print("\nFirst 3 rows:")
+    print(df.head(3))
+    print()
+    
+except Exception as e:
+    print(f"❌ Error loading from GitHub: {e}")
+    print("Please make sure:")
+    print("1. Your GitHub repo is PUBLIC")
+    print("2. The URL is correct")
+    print("3. The file exists in your repo")
+    
+    # Fallback to upload method
+    print("\nFalling back to file upload...")
+    from google.colab import files
+    uploaded = files.upload()
+    filename = list(uploaded.keys())[0]
+    df = pd.read_csv(filename)
+    print(f"✅ Successfully loaded {len(df)} rows after upload")
+
+class EnhancedMonteCarlo:
+    def __init__(self, dataframe):
+        self.df = dataframe
+        self.parameters = {}
+        self.economic_data = {}
+        self._load_economic_data()
+        self._calculate_enhanced_stats()
+    
+    def _load_economic_data(self):
+        """Load and analyze economic indicators"""
+        print("LOADING ECONOMIC INDICATORS:")
+        print("-" * 40)
+        
+        # Economic data from your CSV
+        self.economic_data = {
+            'interest_rates': self.df['Interest_Rate'].values,
+            'economic_growth': self.df['Economic_Growth'].values,
+            'inflation': self.df['Inflation'].values
+        }
+        
+        # Calculate economic regime
+        avg_interest = np.mean(self.economic_data['interest_rates'])
+        avg_growth = np.mean(self.economic_data['economic_growth'])
+        avg_inflation = np.mean(self.economic_data['inflation'])
+        
+        print(f"Average Interest Rate: {avg_interest:.2f}%")
+        print(f"Average Economic Growth: {avg_growth:.2f}%")
+        print(f"Average Inflation: {avg_inflation:.2f}%")
+        
+        # Determine economic regime
+        if avg_interest > 3.0:
+            interest_regime = "HIGH RATES"
+            market_outlook = "CAUTIOUS"
+        else:
+            interest_regime = "LOW RATES" 
+            market_outlook = "BULLISH"
+            
+        if avg_inflation > 3.0:
+            inflation_regime = "HIGH INFLATION"
+            market_outlook = "VOLATILE"
+        else:
+            inflation_regime = "LOW INFLATION"
+            
+        print(f"\nECONOMIC REGIME: {interest_regime}, {inflation_regime}")
+        print(f"MARKET OUTLOOK: {market_outlook}")
+        print()
+    
+    def _calculate_enhanced_stats(self):
+        """Calculate statistics with economic adjustments"""
+        stocks = ["Stock_A", "Stock_B", "Stock_C", "Stock_D", "Stock_E"]
+        
+        print("STOCK PERFORMANCE WITH ECONOMIC ADJUSTMENTS:")
+        print("-" * 50)
+        
+        # Get current economic conditions (latest values)
+        current_interest = self.economic_data['interest_rates'][-1]
+        current_growth = self.economic_data['economic_growth'][-1] 
+        current_inflation = self.economic_data['inflation'][-1]
+        
+        print(f"Current Economic Conditions:")
+        print(f"  Interest Rate: {current_interest:.2f}%")
+        print(f"  Economic Growth: {current_growth:.2f}%")
+        print(f"  Inflation: {current_inflation:.2f}%")
+        print()
+        
+        for stock in stocks:
+            if stock in self.df.columns:
+                prices = self.df[stock].values
+                
+                # Calculate basic returns
+                total_return = (prices[-1] - prices[0]) / prices[0]
+                total_days = len(prices)
+                annualized_return = (1 + total_return) ** (252 / total_days) - 1
+                
+                # Calculate daily volatility
+                daily_returns = []
+                for i in range(1, len(prices)):
+                    if prices[i-1] > 0:
+                        daily_return = (prices[i] - prices[i-1]) / prices[i-1]
+                        daily_returns.append(daily_return)
+                
+                annual_volatility = np.std(daily_returns) * np.sqrt(252) if daily_returns else 0
+                
+                # ECONOMIC ADJUSTMENTS
+                economic_adjustment = 1.0  # Start with neutral adjustment
+                
+                # Interest rate impact (higher rates = lower valuations)
+                if current_interest > 3.0:
+                    economic_adjustment *= 0.95  # -5% for high rates
+                elif current_interest < 2.5:
+                    economic_adjustment *= 1.05  # +5% for low rates
+                
+                # Economic growth impact  
+                if current_growth > 2.5:
+                    economic_adjustment *= 1.08  # +8% for strong growth
+                elif current_growth < 1.0:
+                    economic_adjustment *= 0.92  # -8% for weak growth
+                
+                # Inflation impact
+                if current_inflation > 3.0:
+                    economic_adjustment *= 0.90  # -10% for high inflation
+                
+                # Apply economic adjustment to expected returns
+                adjusted_return = annualized_return * economic_adjustment
+                
+                self.parameters[stock] = {
+                    'annual_return': annualized_return,
+                    'adjusted_return': adjusted_return,
+                    'economic_adjustment': economic_adjustment,
+                    'total_return': total_return,
+                    'volatility': annual_volatility,
+                    'sharpe': adjusted_return / annual_volatility if annual_volatility > 0 else 0,
+                    'current_price': prices[-1]
+                }
+                
+                print(f"{stock}:")
+                print(f"  Base Return: {annualized_return:.1%}")
+                print(f"  Economic Adjustment: {economic_adjustment:.1%}")
+                print(f"  ADJUSTED RETURN: {adjusted_return:.1%}")
+                print(f"  Volatility: {annual_volatility:.1%}")
+                print(f"  Sharpe: {self.parameters[stock]['sharpe']:.2f}")
+                print()
+
+    def economic_regime_analysis(self):
+        """Analyze how different economic regimes affect returns"""
+        print("\n" + "="*50)
+        print("ECONOMIC REGIME ANALYSIS")
+        print("="*50)
+        
+        # Define economic scenarios
+        scenarios = {
+            'HIGH_GROWTH_LOW_INFLATION': {'growth': 3.0, 'inflation': 2.0, 'rates': 2.0},
+            'STAGFLATION': {'growth': 1.0, 'inflation': 4.0, 'rates': 4.0},
+            'RECESSION': {'growth': -1.0, 'inflation': 1.5, 'rates': 1.0},
+            'CURRENT': {'growth': self.economic_data['economic_growth'][-1], 
+                       'inflation': self.economic_data['inflation'][-1],
+                       'rates': self.economic_data['interest_rates'][-1]}
+        }
+        
+        print("Expected Returns in Different Economic Scenarios:")
+        print("-" * 55)
+        
+        for scenario, conditions in scenarios.items():
+            print(f"\n{scenario}:")
+            print(f"  Growth: {conditions['growth']}%, Inflation: {conditions['inflation']}%, Rates: {conditions['rates']}%")
+            
+            total_portfolio_return = 0
+            for stock in ["Stock_A", "Stock_B", "Stock_D", "Stock_E"]:  # Skip Stock_C
+                if stock in self.parameters:
+                    base_return = self.parameters[stock]['annual_return']
+                    
+                    # Calculate scenario adjustment
+                    adjustment = 1.0
+                    if conditions['growth'] > 2.5:
+                        adjustment *= 1.10
+                    elif conditions['growth'] < 0:
+                        adjustment *= 0.85
+                    
+                    if conditions['inflation'] > 3.5:
+                        adjustment *= 0.88
+                    
+                    if conditions['rates'] > 3.5:
+                        adjustment *= 0.92
+                    
+                    scenario_return = base_return * adjustment
+                    total_portfolio_return += 0.25 * scenario_return  # Equal weight
+                    
+                    print(f"    {stock}: {scenario_return:.1%}")
+            
+            print(f"  PORTFOLIO: {total_portfolio_return:.1%}")
+
+    def simulate_with_economic_factors(self, simulations=5000, years=1):
+        """Monte Carlo simulation incorporating economic factors"""
+        print("\n" + "="*50)
+        print("MONTE CARLO WITH ECONOMIC FACTORS")
+        print("="*50)
+        
+        # Optimized portfolio weights
+        optimized_weights = {
+            "Stock_D": 0.40,
+            "Stock_E": 0.35,  
+            "Stock_A": 0.25,
+            "Stock_B": 0.00,
+            "Stock_C": 0.00
+        }
+        
+        print("Portfolio with Economic Adjustments:")
+        total_expected_return = 0
+        for stock, weight in optimized_weights.items():
+            if weight > 0:
+                base_return = self.parameters[stock]['annual_return']
+                adjusted_return = self.parameters[stock]['adjusted_return']
+                total_expected_return += weight * adjusted_return
+                print(f"  {stock}: {weight:.0%}")
+                print(f"    Base: {base_return:.1%} → Adjusted: {adjusted_return:.1%}")
+        
+        print(f"\nOverall Expected Return: {total_expected_return:.1%} (with economic factors)")
+        
+        # Monte Carlo simulation
+        days = years * 252
+        portfolio_returns = []
+        
+        for _ in range(simulations):
+            simulation_return = 0
+            
+            # Add economic uncertainty
+            economic_shock = np.random.normal(1.0, 0.1)  # ±10% economic uncertainty
+            
+            for stock, weight in optimized_weights.items():
+                if weight > 0:
+                    base_return = self.parameters[stock]['adjusted_return'] / 252
+                    volatility = self.parameters[stock]['volatility'] / np.sqrt(252)
+                    
+                    # Simulate with economic factors
+                    stock_return = np.random.normal(base_return * days, volatility * np.sqrt(days))
+                    stock_return *= economic_shock  # Apply economic shock
+                    
+                    simulation_return += weight * stock_return
+            
+            portfolio_returns.append(simulation_return)
+        
+        portfolio_returns = np.array(portfolio_returns)
+        
+        # SPY comparison
+        spy_annual_return = 0.08
+        probability_beats_spy = np.mean(portfolio_returns > spy_annual_return)
+        
+        print(f"\nRESULTS WITH ECONOMIC FACTORS:")
+        print(f"  Mean Portfolio Return: {np.mean(portfolio_returns):.1%}")
+        print(f"  SPY Benchmark: {spy_annual_return:.1%}")
+        print(f"  PROBABILITY OF BEATING SPY: {probability_beats_spy:.1%}")
+        print(f"  Economic-Adjusted Sharpe: {np.mean(portfolio_returns)/np.std(portfolio_returns):.2f}")
+        
+        # Plot results
+        plt.figure(figsize=(12, 6))
+        plt.hist(portfolio_returns, bins=50, alpha=0.7, color='orange', edgecolor='black')
+        plt.axvline(spy_annual_return, color='red', linestyle='--', linewidth=3, label=f'SPY ({spy_annual_return:.1%})')
+        plt.axvline(np.mean(portfolio_returns), color='green', linestyle='--', linewidth=3, 
+                   label=f'Portfolio ({np.mean(portfolio_returns):.1%})')
+        plt.xlabel('Annual Return')
+        plt.ylabel('Frequency')
+        plt.title('Monte Carlo Simulation WITH Economic Factors')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
+        
+        return probability_beats_spy
+
+# Run the enhanced analysis
+enhanced_mc = EnhancedMonteCarlo(df)
+
+# Show economic regime analysis
+enhanced_mc.economic_regime_analysis()
+
+# Run simulation with economic factors
+probability = enhanced_mc.simulate_with_economic_factors(simulations=5000, years=1)
+
+print("\n" + "="*60)
+print("KEY ECONOMIC INSIGHTS:")
+print("="*60)
+print("✓ Interest Rates: Affect stock valuations (higher rates = lower multiples)")
+print("✓ Economic Growth: Drives corporate earnings and stock performance") 
+print("✓ Inflation: Impacts real returns and central bank policy")
+print("✓ Your analysis now includes these real-world economic factors!")
+print("="*60)

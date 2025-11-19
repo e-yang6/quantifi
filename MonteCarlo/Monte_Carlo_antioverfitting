@@ -1,0 +1,362 @@
+# ROBUST MONTE CARLO ANALYSIS - STARTING FROM CSV IMPORT
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import requests
+from io import StringIO
+from scipy import stats
+import warnings
+warnings.filterwarnings('ignore')
+
+
+print("ROBUST MONTE CARLO ANALYSIS - AVOIDING OVERFITTING")
+print("="*70)
+
+# REPLACE THIS WITH YOUR ACTUAL GITHUB RAW URL
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/e-yang6/quantifi/refs/heads/main/UTEFA_QuantiFi_Contestant_Dataset.csv"
+
+print(f"Downloading data from GitHub...")
+print(f"URL: {GITHUB_RAW_URL}")
+
+try:
+    # Download the CSV directly from GitHub
+    response = requests.get(GITHUB_RAW_URL)
+    response.raise_for_status()
+    
+    # Load the data
+    df = pd.read_csv(StringIO(response.text))
+    print(f"✅ Successfully loaded {len(df)} rows of data from GitHub")
+    print(f"Columns: {df.columns.tolist()}")
+    
+except Exception as e:
+    print(f"❌ Error loading from GitHub: {e}")
+    print("Falling back to file upload...")
+    from google.colab import files
+    uploaded = files.upload()
+    filename = list(uploaded.keys())[0]
+    df = pd.read_csv(filename)
+    print(f"✅ Successfully loaded {len(df)} rows after upload")
+
+class RobustMonteCarlo:
+    def __init__(self, dataframe):
+        self.df = dataframe
+        self.parameters = {}
+        self._calculate_robust_stats()
+        self._plot_historical_analysis()
+    
+    def _calculate_robust_stats(self):
+        """Calculate statistics WITHOUT overfitting adjustments"""
+        print("CALCULATING ROBUST STATISTICS:")
+        print("-" * 40)
+        
+        stocks = ["Stock_A", "Stock_B", "Stock_C", "Stock_D", "Stock_E"]
+        
+        for stock in stocks:
+            if stock in self.df.columns:
+                prices = self.df[stock].values
+                
+                # SIMPLE, ROBUST CALCULATIONS - NO ARBITRARY ADJUSTMENTS
+                total_return = (prices[-1] - prices[0]) / prices[0]
+                total_days = len(prices)
+                annualized_return = (1 + total_return) ** (252 / total_days) - 1
+                
+                # Calculate volatility using robust method
+                returns = np.diff(prices) / prices[:-1]
+                annual_volatility = np.std(returns) * np.sqrt(252) if len(returns) > 0 else 0
+                
+                # CONSERVATIVE ESTIMATE: Use 70% of historical return to avoid overfitting
+                conservative_return = annualized_return * 0.7
+                
+                self.parameters[stock] = {
+                    'historical_return': annualized_return,
+                    'conservative_return': conservative_return,  # Penalized for overfitting risk
+                    'volatility': annual_volatility,
+                    'sharpe': conservative_return / annual_volatility if annual_volatility > 0 else 0,
+                    'current_price': prices[-1],
+                    'max_drawdown': self._calculate_max_drawdown(prices)
+                }
+                
+                print(f"{stock}:")
+                print(f"  Historical Return: {annualized_return:.1%}")
+                print(f"  CONSERVATIVE ESTIMATE: {conservative_return:.1%} (30% penalty)")
+                print(f"  Volatility: {annual_volatility:.1%}")
+                print(f"  Max Drawdown: {self.parameters[stock]['max_drawdown']:.1%}")
+                print(f"  Conservative Sharpe: {self.parameters[stock]['sharpe']:.2f}")
+                print()
+    
+    def _calculate_max_drawdown(self, prices):
+        """Calculate maximum drawdown - important risk metric"""
+        peak = prices[0]
+        max_dd = 0
+        
+        for price in prices:
+            if price > peak:
+                peak = price
+            dd = (peak - price) / peak
+            if dd > max_dd:
+                max_dd = dd
+        
+        return max_dd
+    
+    def _plot_historical_analysis(self):
+        """Plot historical analysis without overfitting"""
+        print("📊 HISTORICAL ANALYSIS (No Overfitting)")
+        print("-" * 40)
+        
+        stocks = ["Stock_A", "Stock_B", "Stock_C", "Stock_D", "Stock_E"]
+        
+        # Risk-Return scatter plot
+        returns = [self.parameters[stock]['historical_return'] for stock in stocks if stock in self.parameters]
+        volatilities = [self.parameters[stock]['volatility'] for stock in stocks if stock in self.parameters]
+        names = [stock for stock in stocks if stock in self.parameters]
+        
+        plt.figure(figsize=(12, 8))
+        
+        # Create scatter plot
+        scatter = plt.scatter(volatilities, returns, s=200, alpha=0.7, c=range(len(stocks)), cmap='viridis')
+        
+        # Add labels and risk-free line (assuming 2% risk-free rate)
+        for i, (vol, ret, name) in enumerate(zip(volatilities, returns, names)):
+            plt.annotate(name, (vol, ret), xytext=(5, 5), textcoords='offset points', fontweight='bold')
+        
+        # Add efficient frontier concept
+        plt.axhline(y=0.02, color='red', linestyle='--', alpha=0.7, label='Risk-Free Rate (2%)')
+        plt.xlabel('Volatility (Risk)')
+        plt.ylabel('Expected Return')
+        plt.title('Risk-Return Profile\n(Conservative Estimates to Avoid Overfitting)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.colorbar(scatter, label='Stock Index')
+        plt.show()
+        
+        # Drawdown analysis
+        self._plot_drawdown_analysis()
+    
+    def _plot_drawdown_analysis(self):
+        """Plot drawdown analysis for risk assessment"""
+        stocks = ["Stock_A", "Stock_B", "Stock_C", "Stock_D", "Stock_E"]
+        
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+        axes = axes.flatten()
+        
+        for i, stock in enumerate(stocks):
+            if stock in self.df.columns and i < len(axes):
+                prices = self.df[stock].values
+                
+                # Calculate drawdowns
+                peak = prices[0]
+                drawdowns = []
+                
+                for price in prices:
+                    if price > peak:
+                        peak = price
+                    drawdown = (peak - price) / peak
+                    drawdowns.append(drawdown)
+                
+                axes[i].plot(range(len(drawdowns)), np.array(drawdowns) * 100, 
+                           color='red', linewidth=2, alpha=0.8)
+                axes[i].fill_between(range(len(drawdowns)), np.array(drawdowns) * 100, 
+                                   alpha=0.3, color='red')
+                axes[i].set_title(f'{stock} - Maximum Drawdown: {self.parameters[stock]["max_drawdown"]:.1%}',
+                                fontweight='bold')
+                axes[i].set_xlabel('Trading Days')
+                axes[i].set_ylabel('Drawdown (%)')
+                axes[i].grid(True, alpha=0.3)
+                axes[i].set_ylim(0, max(drawdowns) * 100 * 1.1)
+        
+        axes[-1].set_visible(False)
+        plt.tight_layout()
+        plt.show()
+    
+    def monte_carlo_bootstrap(self, simulations=1000, years=1, confidence_level=0.05):
+        """
+        Robust Monte Carlo using bootstrap resampling to avoid distribution assumptions
+        """
+        print(f"\n🎲 ROBUST MONTE CARLO (Bootstrap Method)")
+        print("="*50)
+        print("Using historical return sampling instead of parametric assumptions")
+        print(f"Confidence Level: {1-confidence_level:.0%}")
+        
+        stocks = ["Stock_A", "Stock_B", "Stock_D", "Stock_E"]  # Conservative: exclude Stock_C
+        
+        # Equal weight portfolio for robustness
+        weights = {stock: 1/len(stocks) for stock in stocks}
+        
+        print(f"Portfolio: Equal weights across {len(stocks)} stocks")
+        for stock in stocks:
+            print(f"  {stock}: {weights[stock]:.0%}")
+        
+        portfolio_returns = []
+        
+        for _ in range(simulations):
+            # Bootstrap: sample random periods from historical data
+            simulation_return = 0
+            
+            for stock in stocks:
+                if stock in self.parameters:
+                    # Sample from historical returns with replacement
+                    prices = self.df[stock].values
+                    returns = np.diff(prices) / prices[:-1]
+                    
+                    if len(returns) > 0:
+                        # Bootstrap sample of returns
+                        sample_size = min(252 * years, len(returns))
+                        bootstrap_returns = np.random.choice(returns, size=sample_size, replace=True)
+                        
+                        # Compound returns
+                        stock_simulation_return = np.prod(1 + bootstrap_returns) - 1
+                        simulation_return += weights[stock] * stock_simulation_return
+            
+            portfolio_returns.append(simulation_return)
+        
+        portfolio_returns = np.array(portfolio_returns)
+        
+        # Conservative SPY comparison
+        spy_annual_return = 0.08  # Historical average
+        probability_beats_spy = np.mean(portfolio_returns > spy_annual_return)
+        
+        # Calculate Value at Risk (VaR) properly
+        var = np.percentile(portfolio_returns, confidence_level * 100)
+        cvar = np.mean(portfolio_returns[portfolio_returns <= var])  # Conditional VaR
+        
+        print(f"\nBOOTSTRAP RESULTS ({simulations} simulations):")
+        print(f"  Mean Portfolio Return: {np.mean(portfolio_returns):.1%}")
+        print(f"  Median Portfolio Return: {np.median(portfolio_returns):.1%}")
+        print(f"  Volatility: {np.std(portfolio_returns):.1%}")
+        print(f"  SPY Benchmark: {spy_annual_return:.1%}")
+        print(f"  Probability of Beating SPY: {probability_beats_spy:.1%}")
+        print(f"  {1-confidence_level:.0%} VaR: {var:.1%} (Worst-case loss)")
+        print(f"  Conditional VaR: {cvar:.1%} (Average loss in worst {confidence_level:.0%} cases)")
+        
+        # Plot bootstrap distribution
+        self._plot_bootstrap_results(portfolio_returns, spy_annual_return, var)
+        
+        return probability_beats_spy
+    
+    def _plot_bootstrap_results(self, returns, spy_return, var):
+        """Plot bootstrap simulation results"""
+        plt.figure(figsize=(14, 10))
+        
+        # Main distribution
+        plt.subplot(2, 2, 1)
+        n, bins, patches = plt.hist(returns, bins=50, alpha=0.7, color='blue', edgecolor='black')
+        plt.axvline(spy_return, color='red', linestyle='--', linewidth=3, label=f'SPY ({spy_return:.1%})')
+        plt.axvline(np.mean(returns), color='green', linestyle='--', linewidth=3, 
+                   label=f'Portfolio Mean ({np.mean(returns):.1%})')
+        plt.axvline(var, color='orange', linestyle='--', linewidth=2, label=f'95% VaR ({var:.1%})')
+        
+        # Highlight VaR region
+        var_region = bins <= var
+        for i in range(len(patches)):
+            if bins[i] <= var:
+                patches[i].set_facecolor('red')
+                patches[i].set_alpha(0.6)
+        
+        plt.xlabel('Portfolio Return')
+        plt.ylabel('Frequency')
+        plt.title('Bootstrap Portfolio Return Distribution\n(No Parametric Assumptions)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        # QQ-Plot for normality check
+        plt.subplot(2, 2, 2)
+        stats.probplot(returns, dist="norm", plot=plt)
+        plt.title('Q-Q Plot: Checking Normality Assumptions')
+        plt.grid(True, alpha=0.3)
+        
+        # Rolling performance (out-of-sample test concept)
+        plt.subplot(2, 2, 3)
+        # Simulate out-of-sample by using first half vs second half
+        split_point = len(self.df) // 2
+        first_half_returns = []
+        second_half_returns = []
+        
+        for stock in ["Stock_A", "Stock_B", "Stock_D", "Stock_E"]:
+            if stock in self.df.columns:
+                prices = self.df[stock].values
+                first_return = (prices[split_point] - prices[0]) / prices[0]
+                second_return = (prices[-1] - prices[split_point]) / prices[split_point]
+                first_half_returns.append(first_return)
+                second_half_returns.append(second_return)
+        
+        plt.bar(['First Half', 'Second Half'], 
+                [np.mean(first_half_returns), np.mean(second_half_returns)],
+                alpha=0.7, color=['blue', 'orange'])
+        plt.ylabel('Average Return')
+        plt.title('Out-of-Sample Consistency Check')
+        plt.grid(True, alpha=0.3)
+        
+        # Risk metrics comparison
+        plt.subplot(2, 2, 4)
+        metrics = ['Mean Return', 'Volatility', 'Sharpe Ratio', 'Max Drawdown']
+        values = [
+            np.mean(returns),
+            np.std(returns),
+            np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0,
+            np.min(returns)  # Simplified max drawdown for simulation
+        ]
+        
+        plt.bar(metrics, values, alpha=0.7, color='green')
+        plt.title('Portfolio Risk Metrics')
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def sensitivity_analysis(self):
+        """Test how sensitive results are to different assumptions"""
+        print(f"\n🔍 SENSITIVITY ANALYSIS")
+        print("="*50)
+        print("Testing robustness to different modeling choices")
+        
+        # Test different confidence levels
+        confidence_levels = [0.01, 0.05, 0.10]
+        var_results = []
+        
+        for cl in confidence_levels:
+            # Quick bootstrap for VaR at different confidence levels
+            sample_returns = np.random.choice(
+                [self.parameters[stock]['historical_return'] for stock in self.parameters],
+                size=1000, replace=True
+            )
+            var = np.percentile(sample_returns, cl * 100)
+            var_results.append((cl, var))
+        
+        print("Value at Risk at Different Confidence Levels:")
+        for cl, var in var_results:
+            print(f"  {1-cl:.0%} Confidence: VaR = {var:.1%}")
+        
+        # Test different portfolio weights
+        print(f"\nPortfolio Weight Sensitivity:")
+        weight_strategies = {
+            'Equal Weight': {stock: 0.25 for stock in ["Stock_A", "Stock_B", "Stock_D", "Stock_E"]},
+            'Conservative': {"Stock_D": 0.4, "Stock_E": 0.3, "Stock_A": 0.2, "Stock_B": 0.1},
+            'Growth Focus': {"Stock_D": 0.5, "Stock_E": 0.3, "Stock_A": 0.2, "Stock_B": 0.0}
+        }
+        
+        for strategy, weights in weight_strategies.items():
+            expected_return = sum(weights[stock] * self.parameters[stock]['conservative_return'] 
+                                for stock in weights)
+            print(f"  {strategy}: {expected_return:.1%} expected return")
+
+# Run robust analysis
+print("Initializing robust Monte Carlo analysis...")
+robust_mc = RobustMonteCarlo(df)
+
+# Run bootstrap Monte Carlo
+probability = robust_mc.monte_carlo_bootstrap(simulations=5000, years=1, confidence_level=0.05)
+
+# Run sensitivity analysis
+robust_mc.sensitivity_analysis()
+
+print("\n" + "="*70)
+print("ROBUST ANALYSIS COMPLETE - OVERFITTING MITIGATED")
+print("="*70)
+print("✓ Conservative return estimates (30% penalty)")
+print("✓ Bootstrap sampling (no distribution assumptions)")
+print("✓ Proper risk metrics (VaR, CVaR, Max Drawdown)")
+print("✓ Sensitivity analysis")
+print("✓ Out-of-sample consistency checks")
+print("✓ No arbitrary economic adjustments")
+print("="*70)
