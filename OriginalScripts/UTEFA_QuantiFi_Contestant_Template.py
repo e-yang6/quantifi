@@ -8,9 +8,6 @@ import csv
 import statistics
 from typing import Dict, List
 
-# --------------------------------------------
-# HARD-CODED PARAMETERS FROM OPTIMIZATION
-# --------------------------------------------
 WIN_PARAMS = {
     "ma_type": "EMA",
     "fast_ma_window": 20,
@@ -41,48 +38,153 @@ WIN_PARAMS = {
 
 PARAMS = WIN_PARAMS.copy()
 
-# ---------------------------------------------------
-# MARKET / PORTFOLIO (unchanged from original spec)
-# ---------------------------------------------------
 class Market:
+    """
+    Represents the stock market with current prices for all available stocks.
+    
+    Attributes:
+        transaction_fee: Float representing the transaction fee (0.5% = 0.005)
+        stocks: Dictionary mapping stock names to their current prices
+    """
     transaction_fee = 0.005
-    def __init__(self):
-        self.stocks = {f"Stock_{c}": 0.0 for c in ["A","B","C","D","E"]}
+    
+    def __init__(self) -> None:
+        # Initialize with 5 stocks
+        # Prices will be set by the backtesting script from the CSV data
+        self.stocks = {
+            "Stock_A": 0.0,
+            "Stock_B": 0.0,
+            "Stock_C": 0.0,
+            "Stock_D": 0.0,
+            "Stock_E": 0.0
+        }
+
     def updateMarket(self):
+        """
+        Updates stock prices to reflect market changes.
+        This function will be implemented during grading.
+        DO NOT MODIFY THIS METHOD.
+        """
         pass
 
 
 class Portfolio:
-    def __init__(self):
-        self.shares = {f"Stock_{c}": 0.0 for c in ["A","B","C","D","E"]}
+    """
+    Represents your investment portfolio containing shares and cash.
+    
+    Attributes:
+        shares: Dictionary mapping stock names to number of shares owned
+        cash: Float representing available cash balance
+    """
+    
+    def __init__(self) -> None:
+        # Start with no shares and $100,000 cash
+        self.shares = {
+            "Stock_A": 0.0,
+            "Stock_B": 0.0,
+            "Stock_C": 0.0,
+            "Stock_D": 0.0,
+            "Stock_E": 0.0
+        }
         self.cash = 100000.0
 
-    def evaluate(self, mkt):
-        total = self.cash
-        for s,n in self.shares.items():
-            total += n * mkt.stocks[s]
-        return total
+    def evaluate(self, curMarket: Market) -> float:
+        """
+        Calculate the total value of the portfolio (shares + cash).
+        
+        Args:
+            curMarket: Current Market object with stock prices
+            
+        Returns:
+            Float representing total portfolio value
+        """
+        total_value = self.cash
+        
+        for stock_name, num_shares in self.shares.items():
+            total_value += num_shares * curMarket.stocks[stock_name]
+        
+        return total_value
 
-    def sell(self, s, n, mkt):
-        if n <= 0: return
-        px = mkt.stocks[s]
-        fee = Market.transaction_fee
-        self.shares[s] -= n
-        self.cash += (1-fee)*n*px
+    def sell(self, stock_name: str, shares_to_sell: float, curMarket: Market) -> None:
+        """
+        Sell shares of a specific stock.
+        
+        Args:
+            stock_name: Name of the stock to sell (must match keys in self.shares)
+            shares_to_sell: Number of shares to sell (must be positive)
+            curMarket: Current Market object with stock prices
+            
+        Raises:
+            ValueError: If shares_to_sell is invalid or exceeds owned shares
+        """
+        if shares_to_sell <= 0:
+            raise ValueError("Number of shares must be positive")
 
-    def buy(self, s, n, mkt):
-        if n <= 0: return
-        px = mkt.stocks[s]
-        fee = Market.transaction_fee
-        cost = (1+fee)*n*px
-        if cost <= self.cash:
-            self.shares[s] += n
-            self.cash -= cost
+        if stock_name not in self.shares:
+            raise ValueError(f"Invalid stock name: {stock_name}")
 
+        if shares_to_sell > self.shares[stock_name]:
+            raise ValueError(f"Attempted to sell {shares_to_sell} shares of {stock_name}, but only {self.shares[stock_name]} available")
 
-# ---------------------------------------------------
-# CONTEXT — now includes ATR, ADX, fee tracking
-# ---------------------------------------------------
+        # Update portfolio
+        self.shares[stock_name] -= shares_to_sell
+        sale_proceeds = (1 - Market.transaction_fee) * shares_to_sell * curMarket.stocks[stock_name]
+        self.cash += sale_proceeds
+
+    def buy(self, stock_name: str, shares_to_buy: float, curMarket: Market) -> None:
+        """
+        Buy shares of a specific stock.
+        
+        Args:
+            stock_name: Name of the stock to buy (must match keys in self.shares)
+            shares_to_buy: Number of shares to buy (must be positive)
+            curMarket: Current Market object with stock prices
+            
+        Raises:
+            ValueError: If shares_to_buy is invalid or exceeds available cash
+        """
+        if shares_to_buy <= 0:
+            raise ValueError("Number of shares must be positive")
+        
+        if stock_name not in self.shares:
+            raise ValueError(f"Invalid stock name: {stock_name}")
+        
+        cost = (1 + Market.transaction_fee) * shares_to_buy * curMarket.stocks[stock_name]
+        
+        if cost > self.cash + 0.01:
+            raise ValueError(f"Attempted to spend ${cost:.2f}, but only ${self.cash:.2f} available")
+
+        # Update portfolio
+        self.shares[stock_name] += shares_to_buy
+        self.cash -= cost
+
+    def get_position_value(self, stock_name: str, curMarket: Market) -> float:
+        """
+        Helper method to get the current value of a specific position.
+        
+        Args:
+            stock_name: Name of the stock
+            curMarket: Current Market object with stock prices
+            
+        Returns:
+            Float representing the total value of owned shares for this stock
+        """
+        return self.shares[stock_name] * curMarket.stocks[stock_name]
+
+    def get_max_buyable_shares(self, stock_name: str, curMarket: Market) -> float:
+        """
+        Helper method to calculate the maximum number of shares that can be bought.
+        
+        Args:
+            stock_name: Name of the stock
+            curMarket: Current Market object with stock prices
+            
+        Returns:
+            Float representing maximum shares that can be purchased with available cash
+        """
+        price_per_share = curMarket.stocks[stock_name] * (1 + Market.transaction_fee)
+        return self.cash / price_per_share if price_per_share > 0 else 0
+
 class Context:
     def __init__(self):
         self.params = PARAMS.copy()
@@ -160,11 +262,6 @@ class Context:
         dx = 100*abs(plus_di-minus_di)/denom
         return dx
 
-
-# ---------------------------------------------------
-# UPDATE PORTFOLIO – final ADX+ATR logic
-# (Fully identical to the optimized version)
-# ---------------------------------------------------
 def update_portfolio(mkt, port, ctx):
 
     p = PARAMS  # shortcut
@@ -175,7 +272,6 @@ def update_portfolio(mkt, port, ctx):
         ctx.day += 1
         return
 
-    # ---- Price history, ATR, ADX ----
     idx=[]
     for s in ctx.stocks:
         px = mkt.stocks[s]
@@ -189,7 +285,6 @@ def update_portfolio(mkt, port, ctx):
 
     ctx.index_history.append(sum(idx)/5.0)
 
-    # ---- Trend MA ----
     def ma(v, w):
         if len(v)<w: return None
         if p["ma_type"]=="SMA":
@@ -214,7 +309,6 @@ def update_portfolio(mkt, port, ctx):
     cross_up   = (not risk_on_prev) and risk_on_now
     cross_down = risk_on_prev and (not risk_on_now)
 
-    # ---- Macro risk multiplier ----
     risk_mult = 1.0
     ir_med = ctx.median_clean(ctx.interest_history[:d+1])
     eg_med = ctx.median_clean(ctx.growth_history[:d+1])
@@ -236,7 +330,6 @@ def update_portfolio(mkt, port, ctx):
 
     risk_mult = max(p["macro_lower"], min(risk_mult, p["macro_upper"]))
 
-    # ---- Trailing Stop ----
     if p["use_trailing_stop"] and ctx.in_position:
         for s in ctx.stocks:
             sh = port.shares[s]
@@ -256,7 +349,6 @@ def update_portfolio(mkt, port, ctx):
             ctx.in_position=False
             for s in ctx.stocks: ctx.peak_price[s]=None
 
-    # ---- ENTRY ----
     if cross_up and not ctx.in_position and ctx.trade_count<p["max_trades"]:
 
         # momentum + ADX filter
@@ -317,7 +409,6 @@ def update_portfolio(mkt, port, ctx):
 
         ctx.in_position = any(port.shares[s]>0 for s in ctx.stocks)
 
-    # ---- EXIT ----
     if cross_down and ctx.in_position and ctx.trade_count<p["max_trades"]:
         for s in ctx.stocks:
             sh=int(port.shares[s])
@@ -334,7 +425,6 @@ def update_portfolio(mkt, port, ctx):
     ctx.day+=1
 
 
-# ---- Helper ----
 def compute_vol(prices, w):
     if len(prices)<w+1: return None
     rets=[]
